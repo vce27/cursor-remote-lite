@@ -408,7 +408,7 @@ function deviceName() {
 
 function showUnpaired(msg = '') {
   gate({
-    msg: (msg ? msg + '\n\n' : '') + '这台设备还没有配对。\n在电脑上运行 npm run pair，用手机扫码；或者把链接复制过来粘贴到下面。',
+    msg: (msg ? msg + '\n\n' : '') + '这台设备还没有配对。\n在电脑桌面面板点「生成配对二维码」扫码；或运行 npm run pair，也可把链接粘贴到下面。',
     err: !!msg,
     input: { placeholder: '粘贴配对链接', button: '配对', submit: pastePair },
   });
