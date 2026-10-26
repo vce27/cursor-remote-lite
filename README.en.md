@@ -229,6 +229,21 @@ How to start on Windows (run these in PowerShell, not Cursor's built-in terminal
 1. In the project directory, run `powershell -ExecutionPolicy Bypass -File .\start-cursor.ps1`. Cursor quits and reopens with the debugging port (the equivalent of `./start-cursor.sh` on Mac).
 2. Then run `npm run public` and keep that window open. `npm run pair` works as usual.
 
+### Use ChmlFrp (or another frp) instead of Cloudflare
+
+If you already have a fixed tunnel such as [ChmlFrp](https://www.chmlfrp.net/), you can skip `cloudflared`:
+
+1. Map `127.0.0.1:3939` (or your `PORT`) in the tunnel panel.
+2. You need an **`https://` public URL** (the GitHub Pages app is HTTPS; browsers block `ws://` mixed content).
+3. Start frpc, then:
+
+```powershell
+$env:CR_RELAY_URL = "https://your-fixed-domain/"
+npm run public:relay
+```
+
+Or `node server.mjs --relay=https://your-fixed-domain/`, or set `"relayUrl"` in `~/.cursor-remote-lite/config.json`.
+
 ### Trade-offs
 
 - **Power use**: a laptop idling with the display off draws about 3–8 W, under 0.2 kWh per day; a desktop draws 30–100 W, 1–2 kWh per day.
@@ -258,7 +273,8 @@ How to start on Windows (run these in PowerShell, not Cursor's built-in terminal
 | `npm run pair` | Pair a new device (shows a QR code) |
 | `npm run devices` | List paired devices; `npm run devices remove <id>` removes one |
 | `npm run 2fa` | Enable / re-bind Authenticator 2FA; `npm run 2fa off` disables it; `npm run 2fa status` shows status |
-| `npm run public` | Run in the foreground (public access + fixed address) |
+| `npm run public` | Run in the foreground (Cloudflare quick tunnel) |
+| `npm run public:relay` | External tunnel (e.g. ChmlFrp); set `CR_RELAY_URL` first |
 | `npm start` | Run in the foreground (LAN only) |
 | `./service.sh status / logs / uninstall` | Background service status / logs / uninstall |
 | `npm run reset` | Clear all pairings, 2FA and configuration (you'll need to pair again afterwards) |

@@ -10,14 +10,14 @@ import qrcode from 'qrcode-terminal';
 import { workspaces, workspaceForTitle, fileSize, readFile, parseRef } from './files.mjs';
 import {
   DATA_DIR, encryptUrl, createPairing, pairingValid, consumePairing, listDevices, addDevice, findDevice, updateDevice,
-  removeDevice, totpConfig, verifyTotp, needsTotp, saveState, appBase,
+  removeDevice, totpConfig, verifyTotp, needsTotp, saveState, readState, appBase,
 } from './auth.mjs';
 import { pushPublicKey, openEventStream, closeEventStreams, addViewer, removeViewer, deliver, startWatcher } from './notify.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3939);
 const HOST = process.env.HOST || '0.0.0.0';
-const CDP_URL = (process.env.CDP_URL || 'http://127.0.0.1:9222').replace(/\/$/, '');
+const CDP_URL = (process.env.CDP_URL || `http://127.0.0.1:${process.env.CDP_PORT || 9222}`).replace(/\/$/, '');
 const TUNNEL = process.argv.includes('--tunnel');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const APP_DIR = path.join(__dirname, 'app');
@@ -28,9 +28,38 @@ const CONFIG = loadConfig();
 const PUBLISH_REPO = process.argv.find(a => a.startsWith('--publish='))?.slice('--publish='.length) || process.env.CR_PUBLISH_REPO || CONFIG.publishRepo || '';
 const APP_ORIGIN = PUBLISH_REPO ? `https://${PUBLISH_REPO.split('/')[0].toLowerCase()}.github.io` : '';
 const ALLOWED_ORIGINS = new Set([APP_ORIGIN, ...(process.env.CR_ALLOWED_ORIGINS || '').split(',')].filter(Boolean));
+// External tunnel (e.g. ChmlFrp): fixed HTTPS URL; skips cloudflared. Prefer https:// for GitHub Pages (wss).
+const WANT_RELAY = process.argv.includes('--relay') || process.argv.some(a => a.startsWith('--relay='));
+const RELAY_URL = normalizeRelayUrl(
+  process.argv.find(a => a.startsWith('--relay='))?.slice('--relay='.length)
+  || process.env.CR_RELAY_URL
+  || CONFIG.relayUrl
+  || readState().relayUrl
+  || '',
+);
+if (WANT_RELAY && !RELAY_URL) {
+  console.error('使用外部隧道时请提供 HTTPS 地址，任选其一：');
+  console.error('  set CR_RELAY_URL=https://你的域名/   && npm run public:relay');
+  console.error('  node server.mjs --relay=https://你的域名/');
+  console.error('  或在 ~/.cursor-remote-lite/config.json 写入 "relayUrl"');
+  process.exit(1);
+}
+const PUBLIC = TUNNEL || !!RELAY_URL;
 
 function loadConfig() {
   try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch { return {}; }
+}
+
+function normalizeRelayUrl(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+    return u.href.replace(/\/?$/, '/');
+  } catch {
+    return '';
+  }
 }
 
 // A device is usable once paired and, when 2FA asks for it, re-verified.
@@ -219,14 +248,37 @@ function pageHelpers() {
     return titled || el.querySelector('.ui-edit-tool-call__filename')?.innerText.trim() || null;
   };
 
+  // Classic editor chats use data-flat-index; Agents / glass UI uses data-message-kind (no flat index).
+  const ITEM = '[data-flat-index], [data-message-kind]';
+  const itemId = el => el.dataset.flatIndex || el.dataset.messageId || el.dataset.messageIndex || '';
+  const inItem = el => el.closest(ITEM);
   const findPanel = () => {
-    for (const ed of [...document.querySelectorAll('.aislash-editor-input, .ui-prompt-input-editor__input')].filter(vis)) {
-      let p = ed;
-      while (p && !p.querySelector('[data-flat-index]')) p = p.parentElement;
-      if (p) return p;
-    }
-    const f = [...document.querySelectorAll('[data-flat-index]')].find(vis);
-    return f ? f.closest('.composer-bar') || f.parentElement : null;
+    // Agents keeps multiple conversation shells in the DOM; pick the one with the focused
+    // composer, otherwise the visible transcript that currently holds the most messages.
+    const shells = [...document.querySelectorAll('.composer-messages-container, .composer-react-transcript-root, .agent-panel-conversation-shell')]
+      .filter(vis)
+      .map(el => ({ el, n: el.querySelectorAll(ITEM).length }));
+    const focused = document.activeElement?.closest?.('.aislash-editor-input, .ui-prompt-input-editor__input, [contenteditable="true"]');
+    const fromFocus = focused && shells.map(s => s.el).find(el => el.contains(focused));
+    if (fromFocus) return fromFocus;
+    shells.sort((a, b) => b.n - a.n);
+    if (shells[0]?.n) return shells[0].el;
+
+    // Classic: climb from a visible composer until an ancestor contains message items.
+    // Prefer the climb that sees the most items (ghost/readonly editors can match first otherwise).
+    const ranked = [...document.querySelectorAll('.aislash-editor-input, .ui-prompt-input-editor__input')].filter(vis)
+      .map(ed => {
+        let p = ed;
+        while (p && !p.querySelector(ITEM)) p = p.parentElement;
+        return p ? { p, n: p.querySelectorAll(ITEM).length } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.n - a.n);
+    if (ranked[0]) return ranked[0].p;
+
+    const f = [...document.querySelectorAll(ITEM)].find(vis);
+    if (!f) return null;
+    return f.closest('.composer-messages-container, .composer-react-transcript-root, .composer-bar, .agent-panel-conversation-shell, .agent-conversation-composer__viewport') || f.parentElement;
   };
 
   const buttonsIn = (root, strict) => [...root.querySelectorAll('button, [role=button], .anysphere-button, .anysphere-secondary-button, .composer-run-button, .composer-skip-button')]
@@ -262,7 +314,11 @@ function pageHelpers() {
     return head.innerText.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 240);
   };
 
-  const topItems = panel => [...panel.querySelectorAll('[data-flat-index]')].filter(e => !e.parentElement.closest('[data-flat-index]'));
+  const topItems = panel => {
+    const flats = [...panel.querySelectorAll('[data-flat-index]')].filter(e => !e.parentElement.closest('[data-flat-index]'));
+    if (flats.length) return flats;
+    return [...panel.querySelectorAll('[data-message-kind]')].filter(e => !e.parentElement.closest('[data-message-kind]'));
+  };
 
   // Messages sent while the Agent is running wait in Cursor's queue tray until the current turn ends.
   const QUEUE_ROW = '[data-queue-row], .composer-toolbar-queue-item[data-queue-item-id]';
@@ -291,7 +347,7 @@ function pageHelpers() {
   const subagents = () => {
     const names = new Set();
     for (const h of document.querySelectorAll('.task-tool-call-header')) {
-      if (!vis(h) || !h.closest('[data-flat-index]')?.querySelector('.ui-subagent-status-indicator--running-loader, .task-subagent-header-pill-button--stop')) continue;
+      if (!vis(h) || !inItem(h)?.querySelector('.ui-subagent-status-indicator--running-loader, .task-subagent-header-pill-button--stop')) continue;
       const n = h.querySelector('span.truncate')?.childNodes[0]?.textContent.trim();
       if (n) names.add(n);
     }
@@ -407,7 +463,7 @@ function pageHelpers() {
     const items = topItems(panel).map(el => {
       const kindEl = el.matches('[data-message-kind]') ? el : el.querySelector('[data-message-kind]');
       const k = kindEl?.dataset.messageKind || (el.querySelector('.composer-human-message, .aislash-editor-input-readonly') ? 'human' : 'other');
-      const item = { i: el.dataset.flatIndex, k };
+      const item = { i: itemId(el), k };
       if (k === 'human') item.t = (el.querySelector('.aislash-editor-input-readonly, .composer-human-message') || el).innerText.trim();
       else if (k === 'assistant') { const md = el.querySelector('.markdown-root'); item.h = md ? clean(md) : esc(el.innerText); }
       else item.t = summary(el);
@@ -416,7 +472,7 @@ function pageHelpers() {
       if (b.length) item.b = b.map(x => x.label);
       return item;
     });
-    const global = buttonsIn(panel, true).filter(x => !x.el.closest('[data-flat-index]') && !inQn(x.el)).map(x => x.label);
+    const global = buttonsIn(panel, true).filter(x => !inItem(x.el) && !inQn(x.el)).map(x => x.label);
     const modeEl = [...document.querySelectorAll('.composer-unified-dropdown[data-mode]')].find(vis);
     const modelEl = [...document.querySelectorAll('.ui-model-picker__trigger, .composer-unified-dropdown-model')].find(vis);
     return {
@@ -507,9 +563,12 @@ function pageHelpers() {
   const locate = (item, n) => {
     const panel = findPanel();
     if (!panel) return null;
-    const root = item === 'g' ? panel : panel.querySelector(`[data-flat-index="${CSS.escape(item)}"]`);
+    const root = item === 'g' ? panel
+      : panel.querySelector(`[data-flat-index="${CSS.escape(item)}"]`)
+        || panel.querySelector(`[data-message-id="${CSS.escape(item)}"]`)
+        || [...panel.querySelectorAll(ITEM)].find(e => itemId(e) === item);
     if (!root) return null;
-    const list = item === 'g' ? buttonsIn(panel, true).filter(x => !x.el.closest('[data-flat-index]') && !inQn(x.el)) : buttonsIn(root, false);
+    const list = item === 'g' ? buttonsIn(panel, true).filter(x => !inItem(x.el) && !inQn(x.el)) : buttonsIn(root, false);
     const b = list[n]?.el;
     if (!b) return null;
     b.scrollIntoView({ block: 'center' });
@@ -535,9 +594,9 @@ function pageHelpers() {
     let waiting = null, waitingText = '';
     for (const el of items.slice(-3)) {
       const labels = buttonsIn(el, false).map(x => x.label).filter(l => WAIT.test(l));
-      if (labels.length) { waiting = `${el.dataset.flatIndex}:${labels.join('/')}`; waitingText = summary(el); }
+      if (labels.length) { waiting = `${itemId(el)}:${labels.join('/')}`; waitingText = summary(el); }
     }
-    const global = buttonsIn(panel, true).filter(x => !x.el.closest('[data-flat-index]') && !inQn(x.el) && WAIT.test(x.label)).map(x => x.label);
+    const global = buttonsIn(panel, true).filter(x => !inItem(x.el) && !inQn(x.el) && WAIT.test(x.label)).map(x => x.label);
     if (!waiting && global.length) { waiting = `g:${global.join('/')}`; waitingText = global.join(' / '); }
     const qs = questions();
     if (qs?.list.length) {
@@ -1410,6 +1469,20 @@ async function publishUrl(url) {
   }
 }
 
+function useExternalRelay(url) {
+  if (url.startsWith('http://')) {
+    console.log('!! 警告：中继地址是 http://。GitHub Pages 上的 App 是 https，浏览器通常会拦截 ws://（混合内容）。请用 ChmlFrp HTTPS 隧道或自备证书的 https:// 域名。');
+  }
+  console.log(`\n公网地址（外部隧道）：${url}`);
+  console.log(`请确认 frpc / ChmlFrp 等已把外网映射到 127.0.0.1:${PORT}`);
+  saveState({ relayUrl: url });
+  if (PUBLISH_REPO) publishUrl(url);
+  else {
+    console.log('（未配置 publishRepo：配对过的手机不会自动拿到这个地址；运行 npm run setup，或配对时直接用该 https 链接）');
+    offerFirstPairing();
+  }
+}
+
 function startTunnel() {
   const child = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${PORT}`], { stdio: ['ignore', 'pipe', 'pipe'] });
   let shown = false;
@@ -1435,7 +1508,7 @@ function startTunnel() {
   process.on('SIGTERM', stop);
 }
 
-server.listen(PORT, TUNNEL ? '127.0.0.1' : HOST, async () => {
+server.listen(PORT, PUBLIC ? '127.0.0.1' : HOST, async () => {
   console.log(`Cursor Remote Lite 已启动，端口 ${PORT}`);
   console.log(`已配对 ${listDevices().length} 台设备。添加新设备：npm run pair`);
   startWatcher({
@@ -1449,7 +1522,9 @@ server.listen(PORT, TUNNEL ? '127.0.0.1' : HOST, async () => {
   } catch {
     console.log(`!! 连不上 ${CDP_URL}。请用 ./start-cursor.sh（Windows: start-cursor.ps1）重新启动 Cursor（带 --remote-debugging-port=9222）`);
   }
-  if (TUNNEL) {
+  if (RELAY_URL) {
+    useExternalRelay(RELAY_URL);
+  } else if (TUNNEL) {
     console.log('正在建立 Cloudflare 公网隧道…');
     startTunnel();
   } else {

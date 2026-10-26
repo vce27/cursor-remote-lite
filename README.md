@@ -227,6 +227,28 @@ Windows 上的启动方式（都在 PowerShell 里运行，不要用 Cursor 自�
 1. 在项目目录运行 `powershell -ExecutionPolicy Bypass -File .\start-cursor.ps1`，Cursor 会退出并带调试端口重新打开（等同于 Mac 上的 `./start-cursor.sh`）。
 2. 再运行 `npm run public`，这个窗口一直开着别关。`npm run pair` 照常使用。
 
+### 用 ChmlFrp（或其它 frp）代替 Cloudflare
+
+Cloudflare 免费快速隧道地址会变、偶尔断开。若你已有 [ChmlFrp](https://www.chmlfrp.net/) 等固定隧道，可以跳过 `cloudflared`：
+
+1. 在 ChmlFrp 控制台创建隧道：本地 `127.0.0.1`，内网端口 `3939`（或你设的 `PORT`）。
+2. **必须能得到 `https://` 公网地址**（GitHub Pages 上的 App 是 HTTPS，浏览器会拦截 `ws://` 混合内容）。HTTPS 隧道需自备证书挂在本机，或使用提供 HTTPS 的域名/节点；境内节点用浏览器访问通常还要备案域名。
+3. 启动 frpc，确认隧道在线。
+4. 在本机发布固定地址并启动中继（PowerShell）：
+
+```powershell
+$env:CR_RELAY_URL = "https://你的固定域名/"   # 末尾斜杠可有可无
+npm run public:relay
+```
+
+也可以写入 `~/.cursor-remote-lite/config.json` 的 `"relayUrl"` 字段，或：
+
+```powershell
+node server.mjs --relay=https://你的固定域名/
+```
+
+中继只监听 `127.0.0.1`；外网流量仍走你的 frpc。已跑过 `npm run setup` 时会把该地址写进 GitHub Pages，手机不用重新配对。
+
 ### 代价
 
 - **耗电**：笔记本熄屏待机约 3–8 W，一天不到 0.2 度电；台式机 30–100 W，一天 1–2 度电。
@@ -256,7 +278,8 @@ Windows 上的启动方式（都在 PowerShell 里运行，不要用 Cursor 自�
 | `npm run pair` | 配对一台新设备（显示二维码） |
 | `npm run devices` | 查看已配对设备；`npm run devices remove <id>` 移除 |
 | `npm run 2fa` | 开启 / 重新绑定 Authenticator 二次验证；`npm run 2fa off` 关闭；`npm run 2fa status` 查看 |
-| `npm run public` | 前台运行（外网 + 固定地址） |
+| `npm run public` | 前台运行（外网 + Cloudflare 快速隧道） |
+| `npm run public:relay` | 前台运行（外网 + 外部隧道，如 ChmlFrp；需先设 `CR_RELAY_URL`） |
 | `npm start` | 前台运行（只在局域网） |
 | `./service.sh status / logs / uninstall` | 后台服务状态 / 日志 / 卸载 |
 | `npm run reset` | 清除所有配对、二次验证和配置（之后要重新配对） |

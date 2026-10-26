@@ -8,6 +8,7 @@
     "setup": "node setup.mjs",
     "start": "node server.mjs",
     "public": "node server.mjs --tunnel",
+    "public:relay": "node server.mjs --relay",
     "pair": "node devices.mjs pair",
     "devices": "node devices.mjs",
     "2fa": "node twofa.mjs",
