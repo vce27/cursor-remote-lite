@@ -224,25 +224,33 @@ powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /setactive SCHEME_CURRENT
 ```
 
-How to start on Windows (run these in PowerShell, not Cursor's built-in terminal, which closes when Cursor restarts):
+**Easiest on Windows** (PowerShell outside Cursor's terminal):
 
-1. In the project directory, run `powershell -ExecutionPolicy Bypass -File .\start-cursor.ps1`. Cursor quits and reopens with the debugging port (the equivalent of `./start-cursor.sh` on Mac).
-2. Then run `npm run public` and keep that window open. `npm run pair` works as usual.
+```powershell
+# Optional once: put your ChmlFrp URL in %USERPROFILE%\.cursor-remote-lite\config.json
+# { "relayUrl": "http://your-tunnel-host:port/" }
+
+powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
+```
+
+This detects Cursor debugging ports (two Cursors are fine — windows are merged), launches Cursor on a free port if needed, then starts the relay. Keep the window open; run `npm run pair` in another terminal to scan.
 
 ### Use ChmlFrp (or another frp) instead of Cloudflare
 
 If you already have a fixed tunnel such as [ChmlFrp](https://www.chmlfrp.net/), you can skip `cloudflared`:
 
 1. Map `127.0.0.1:3939` (or your `PORT`) in the tunnel panel.
-2. You need an **`https://` public URL** (the GitHub Pages app is HTTPS; browsers block `ws://` mixed content).
+2. Public URL may be `http://` or `https://`:
+   - **http://**: pairing opens the relay itself (same origin as WebSocket) — works without GitHub Pages.
+   - **https://**: you can keep using Pages for a fixed app URL.
 3. Start frpc, then:
 
 ```powershell
-$env:CR_RELAY_URL = "https://your-fixed-domain/"
-npm run public:relay
+$env:CR_RELAY_URL = "http://your-tunnel/"
+powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
 ```
 
-Or `node server.mjs --relay=https://your-fixed-domain/`, or set `"relayUrl"` in `~/.cursor-remote-lite/config.json`.
+Or set `"relayUrl"` in `~/.cursor-remote-lite/config.json` and just run `start-phone.ps1`.
 
 ### Trade-offs
 
@@ -275,6 +283,7 @@ Or `node server.mjs --relay=https://your-fixed-domain/`, or set `"relayUrl"` in 
 | `npm run 2fa` | Enable / re-bind Authenticator 2FA; `npm run 2fa off` disables it; `npm run 2fa status` shows status |
 | `npm run public` | Run in the foreground (Cloudflare quick tunnel) |
 | `npm run public:relay` | External tunnel (e.g. ChmlFrp); set `CR_RELAY_URL` first |
+| `npm run phone` / `start-phone.ps1` | Windows one-shot: Cursor CDP + relay (recommended) |
 | `npm start` | Run in the foreground (LAN only) |
 | `./service.sh status / logs / uninstall` | Background service status / logs / uninstall |
 | `npm run reset` | Clear all pairings, 2FA and configuration (you'll need to pair again afterwards) |

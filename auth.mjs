@@ -167,12 +167,16 @@ export const readState = () => readJson('state.json', {});
 export const readConfig = () => readJson('config.json', {});
 
 // Where the phone app lives: the GitHub Pages copy if configured, else the relay itself.
+// HTTP relays cannot be reached from the HTTPS Pages app (browsers block mixed-content WebSockets),
+// so pair against the relay origin directly in that case — one scan, same host for UI + /ws.
 export function appBase() {
+  const s = readState();
+  const relay = s.relayUrl ? s.relayUrl.replace(/\/?$/, '/') : null;
+  if (relay?.startsWith('http://')) return relay;
   const repo = readConfig().publishRepo;
   if (repo) {
     const [owner, name] = repo.split('/');
     return `https://${owner.toLowerCase()}.github.io/${name}/`;
   }
-  const s = readState();
-  return s.relayUrl ? s.relayUrl.replace(/\/?$/, '/') : null;
+  return relay;
 }

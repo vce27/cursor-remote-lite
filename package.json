@@ -9,6 +9,7 @@
     "start": "node server.mjs",
     "public": "node server.mjs --tunnel",
     "public:relay": "node server.mjs --relay",
+    "phone": "powershell -ExecutionPolicy Bypass -File ./start-phone.ps1",
     "pair": "node devices.mjs pair",
     "devices": "node devices.mjs",
     "2fa": "node twofa.mjs",

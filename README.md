@@ -222,32 +222,38 @@ powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /setactive SCHEME_CURRENT
 ```
 
-Windows 上的启动方式（都在 PowerShell 里运行，不要用 Cursor 自带的终端，Cursor 重启时它会被一起关掉）：
+Windows 上**最省事**（在 PowerShell 里运行，不要用 Cursor 自带终端）：
 
-1. 在项目目录运行 `powershell -ExecutionPolicy Bypass -File .\start-cursor.ps1`，Cursor 会退出并带调试端口重新打开（等同于 Mac 上的 `./start-cursor.sh`）。
-2. 再运行 `npm run public`，这个窗口一直开着别关。`npm run pair` 照常使用。
+```powershell
+# 可选：把 ChmlFrp 公网地址写进配置，以后不用每次设
+# {"relayUrl":"http://你的隧道地址:端口/"}  →  %USERPROFILE%\.cursor-remote-lite\config.json
+
+powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
+```
+
+这一条会：检测到已有调试端口的 Cursor（支持同时开 2 个，端口自动合并），没有就帮你用空闲端口重启 Cursor；然后启动中继。窗口一直开着。另开一个终端 `npm run pair` 扫码即可。
+
+分步启动也可以：`start-cursor.ps1` → `npm run public`（或 `npm run public:relay`）。
 
 ### 用 ChmlFrp（或其它 frp）代替 Cloudflare
 
 Cloudflare 免费快速隧道地址会变、偶尔断开。若你已有 [ChmlFrp](https://www.chmlfrp.net/) 等固定隧道，可以跳过 `cloudflared`：
 
 1. 在 ChmlFrp 控制台创建隧道：本地 `127.0.0.1`，内网端口 `3939`（或你设的 `PORT`）。
-2. **必须能得到 `https://` 公网地址**（GitHub Pages 上的 App 是 HTTPS，浏览器会拦截 `ws://` 混合内容）。HTTPS 隧道需自备证书挂在本机，或使用提供 HTTPS 的域名/节点；境内节点用浏览器访问通常还要备案域名。
+2. 公网可以是 `http://` 或 `https://`：
+   - **http://**（最常见）：配对二维码会打开中继地址本身，手机与 WebSocket 同源，**可直接用**，不必上 GitHub Pages。
+   - **https://**：可继续用 Pages 固定 App 地址；需要证书或平台提供的 HTTPS 节点。
 3. 启动 frpc，确认隧道在线。
-4. 在本机发布固定地址并启动中继（PowerShell）：
+4. 一键启动：
 
 ```powershell
-$env:CR_RELAY_URL = "https://你的固定域名/"   # 末尾斜杠可有可无
-npm run public:relay
+$env:CR_RELAY_URL = "http://你的隧道地址/"   # 或 https://…
+powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
 ```
 
-也可以写入 `~/.cursor-remote-lite/config.json` 的 `"relayUrl"` 字段，或：
+或写入 `%USERPROFILE%\.cursor-remote-lite\config.json` 的 `"relayUrl"`，以后只跑 `start-phone.ps1`。
 
-```powershell
-node server.mjs --relay=https://你的固定域名/
-```
-
-中继只监听 `127.0.0.1`；外网流量仍走你的 frpc。已跑过 `npm run setup` 时会把该地址写进 GitHub Pages，手机不用重新配对。
+中继只监听 `127.0.0.1`；外网流量走 frpc。两个 Cursor 窗口会出现在手机「切换窗口」列表里（带端口标记）。
 
 ### 代价
 
@@ -280,6 +286,7 @@ node server.mjs --relay=https://你的固定域名/
 | `npm run 2fa` | 开启 / 重新绑定 Authenticator 二次验证；`npm run 2fa off` 关闭；`npm run 2fa status` 查看 |
 | `npm run public` | 前台运行（外网 + Cloudflare 快速隧道） |
 | `npm run public:relay` | 前台运行（外网 + 外部隧道，如 ChmlFrp；需先设 `CR_RELAY_URL`） |
+| `npm run phone` / `start-phone.ps1` | Windows 一键：检查/启动 Cursor 调试端口 + 中继（推荐） |
 | `npm start` | 前台运行（只在局域网） |
 | `./service.sh status / logs / uninstall` | 后台服务状态 / 日志 / 卸载 |
 | `npm run reset` | 清除所有配对、二次验证和配置（之后要重新配对） |

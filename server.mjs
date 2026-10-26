@@ -17,7 +17,6 @@ import { pushPublicKey, openEventStream, closeEventStreams, addViewer, removeVie
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3939);
 const HOST = process.env.HOST || '0.0.0.0';
-const CDP_URL = (process.env.CDP_URL || `http://127.0.0.1:${process.env.CDP_PORT || 9222}`).replace(/\/$/, '');
 const TUNNEL = process.argv.includes('--tunnel');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const APP_DIR = path.join(__dirname, 'app');
@@ -28,7 +27,7 @@ const CONFIG = loadConfig();
 const PUBLISH_REPO = process.argv.find(a => a.startsWith('--publish='))?.slice('--publish='.length) || process.env.CR_PUBLISH_REPO || CONFIG.publishRepo || '';
 const APP_ORIGIN = PUBLISH_REPO ? `https://${PUBLISH_REPO.split('/')[0].toLowerCase()}.github.io` : '';
 const ALLOWED_ORIGINS = new Set([APP_ORIGIN, ...(process.env.CR_ALLOWED_ORIGINS || '').split(',')].filter(Boolean));
-// External tunnel (e.g. ChmlFrp): fixed HTTPS URL; skips cloudflared. Prefer https:// for GitHub Pages (wss).
+// External tunnel (e.g. ChmlFrp): fixed URL; skips cloudflared. Prefer https:// when using GitHub Pages.
 const WANT_RELAY = process.argv.includes('--relay') || process.argv.some(a => a.startsWith('--relay='));
 const RELAY_URL = normalizeRelayUrl(
   process.argv.find(a => a.startsWith('--relay='))?.slice('--relay='.length)
@@ -38,13 +37,17 @@ const RELAY_URL = normalizeRelayUrl(
   || '',
 );
 if (WANT_RELAY && !RELAY_URL) {
-  console.error('使用外部隧道时请提供 HTTPS 地址，任选其一：');
+  console.error('使用外部隧道时请提供公网地址，任选其一：');
   console.error('  set CR_RELAY_URL=https://你的域名/   && npm run public:relay');
   console.error('  node server.mjs --relay=https://你的域名/');
   console.error('  或在 ~/.cursor-remote-lite/config.json 写入 "relayUrl"');
+  console.error('  http:// 也可以：配对二维码会指向中继本身（不用 GitHub Pages），避免混合内容拦截');
   process.exit(1);
 }
 const PUBLIC = TUNNEL || !!RELAY_URL;
+// One Cursor → one CDP port. Two Cursors → scan several ports and merge their windows.
+const CDP_BASES = cdpBases();
+const CDP_URL = CDP_BASES[0];
 
 function loadConfig() {
   try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch { return {}; }
@@ -60,6 +63,14 @@ function normalizeRelayUrl(raw) {
   } catch {
     return '';
   }
+}
+
+function cdpBases() {
+  if (process.env.CDP_URL) return [process.env.CDP_URL.replace(/\/$/, '')];
+  const preferred = process.env.CDP_PORT || '';
+  const listed = (process.env.CDP_PORTS || '9222,9333,9223,9224').split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+  const ports = [...new Set([preferred, ...listed].filter(Boolean))];
+  return ports.map(p => (/^\d+$/.test(p) ? `http://127.0.0.1:${p}` : p.replace(/\/$/, '')));
 }
 
 // A device is usable once paired and, when 2FA asks for it, re-verified.
@@ -116,18 +127,33 @@ function originAllowed(req) {
 }
 
 async function listWindows() {
-  const res = await fetch(`${CDP_URL}/json/list`).catch(() => {
-    throw new Error('连不上 Cursor：Cursor 没有用 start-cursor.sh / start-cursor.ps1 启动（调试端口未开启）');
-  });
-  const targets = await res.json();
-  return targets
-    .filter(t => t.type === 'page' && /workbench/.test(t.url))
-    .map(t => ({
-      id: t.id,
-      title: t.title,
-      ws: t.webSocketDebuggerUrl,
-      kind: t.title === 'Cursor Agents' ? 'agents' : /\[SSH: /.test(t.title) ? 'ssh' : 'local',
-    }));
+  const results = await Promise.all(CDP_BASES.map(async base => {
+    try {
+      const res = await fetch(`${base}/json/list`);
+      if (!res.ok) return [];
+      const targets = await res.json();
+      if (!Array.isArray(targets)) return [];
+      const port = new URL(base).port || (base.startsWith('https') ? '443' : '80');
+      return targets
+        .filter(t => t.type === 'page' && /workbench/.test(t.url || ''))
+        .map(t => ({
+          // Prefix with port so two Cursor instances never collide on target ids.
+          id: `${port}:${t.id}`,
+          rawId: t.id,
+          port,
+          title: t.title,
+          ws: t.webSocketDebuggerUrl,
+          kind: t.title === 'Cursor Agents' ? 'agents' : /\[SSH: /.test(t.title) ? 'ssh' : 'local',
+        }));
+    } catch {
+      return [];
+    }
+  }));
+  const wins = results.flat();
+  if (!wins.length) {
+    throw new Error(`连不上 Cursor：请用 start-cursor.ps1 / start-phone.ps1 带调试端口启动（已扫描 ${CDP_BASES.join(', ')}）`);
+  }
+  return wins;
 }
 
 class Cdp {
@@ -990,8 +1016,9 @@ class Session {
   async attach(targetId) {
     this.detach();
     const wins = await listWindows();
-    const win = wins.find(w => w.id === targetId) || wins[0];
-    if (!win) throw new Error('没有找到 Cursor 窗口，确认 Cursor 是以 --remote-debugging-port=9222 启动的');
+    // Accept composite "port:id" (new) or bare target id (older phone store / notifications).
+    const win = wins.find(w => w.id === targetId || w.rawId === targetId) || wins[0];
+    if (!win) throw new Error('没有找到 Cursor 窗口，确认 Cursor 是以调试端口启动的（start-phone.ps1 / start-cursor.ps1）');
     const cdp = new Cdp(win.ws);
     await cdp.connect();
     this.cdp = cdp;
@@ -1145,7 +1172,7 @@ class Session {
   }
 
   async handle(msg) {
-    if (msg.t === 'windows') return this.emit({ t: 'windows', list: (await listWindows()).map(({ id, title, kind }) => ({ id, title, kind })), current: this.targetId });
+    if (msg.t === 'windows') return this.emit({ t: 'windows', list: (await listWindows()).map(({ id, title, kind, port }) => ({ id, title, kind, port })), current: this.targetId });
     if (msg.t === 'attach') return this.attach(msg.id);
     if (msg.t === 'mode') return this.setMode(msg.mode);
     if (msg.t === 'visible') { this.visible = Boolean(msg.v); return; }
@@ -1470,15 +1497,17 @@ async function publishUrl(url) {
 }
 
 function useExternalRelay(url) {
-  if (url.startsWith('http://')) {
-    console.log('!! 警告：中继地址是 http://。GitHub Pages 上的 App 是 https，浏览器通常会拦截 ws://（混合内容）。请用 ChmlFrp HTTPS 隧道或自备证书的 https:// 域名。');
-  }
   console.log(`\n公网地址（外部隧道）：${url}`);
   console.log(`请确认 frpc / ChmlFrp 等已把外网映射到 127.0.0.1:${PORT}`);
   saveState({ relayUrl: url });
+  if (url.startsWith('http://')) {
+    console.log('中继是 http://：配对二维码会打开这个地址本身（不用 GitHub Pages），手机与 WebSocket 同源，可正常连接。');
+    offerFirstPairing();
+    return;
+  }
   if (PUBLISH_REPO) publishUrl(url);
   else {
-    console.log('（未配置 publishRepo：配对过的手机不会自动拿到这个地址；运行 npm run setup，或配对时直接用该 https 链接）');
+    console.log('（未配置 publishRepo：配对过的手机不会自动拿到这个地址；运行 npm run setup，或配对时直接扫码）');
     offerFirstPairing();
   }
 }
@@ -1518,9 +1547,10 @@ server.listen(PORT, PUBLIC ? '127.0.0.1' : HOST, async () => {
   });
   try {
     const wins = await listWindows();
-    console.log(`已连上 Cursor，${wins.length} 个窗口：${wins.map(w => w.title).join(' | ')}`);
-  } catch {
-    console.log(`!! 连不上 ${CDP_URL}。请用 ./start-cursor.sh（Windows: start-cursor.ps1）重新启动 Cursor（带 --remote-debugging-port=9222）`);
+    const ports = [...new Set(wins.map(w => w.port))];
+    console.log(`已连上 Cursor（CDP ${ports.map(p => ':' + p).join(' ')}），${wins.length} 个窗口：${wins.map(w => `${w.title}${ports.length > 1 ? ' :' + w.port : ''}`).join(' | ')}`);
+  } catch (e) {
+    console.log(`!! ${e.message}`);
   }
   if (RELAY_URL) {
     useExternalRelay(RELAY_URL);
