@@ -5,7 +5,9 @@ const I18N = (() => {
   const lang = saved === 'zh' || saved === 'en' ? saved : /^zh\b/i.test(navigator.language || '') ? 'zh' : 'en';
 
   const EN = {
-    '连接中…': 'Connecting…', '对话': 'Chat', '画面': 'Screen', '↑ 加载更早的消息': '↑ Load earlier messages',
+    '连接中…': 'Connecting…', '未连上 Cursor': 'Cursor not linked',
+    '电脑上的 Cursor 没用调试端口启动。请在桌面面板点「检查 Cursor」': 'Desktop Cursor was not started with the debug port. Tap “Check Cursor” on the desktop panel.',
+    '对话': 'Chat', '画面': 'Screen', '↑ 加载更早的消息': '↑ Load earlier messages',
     '没找到聊天面板。': 'No chat panel found.', '请在 Cursor 里打开 Agent 对话，或切到「画面」查看。': 'Open an Agent chat in Cursor, or switch to "Screen".',
     '↓ 最新': '↓ Latest', '聊天面板': 'Chat panel', '整个窗口': 'Whole window', '点击': 'Tap', '滚动': 'Scroll', '刷新': 'Refresh',
     '回车': 'Enter', '⌘回车': '⌘Enter', '打开聊天': 'Open chat', '右键': 'Right-click', '历史': 'History', '＋ 新建': '+ New',

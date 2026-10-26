@@ -96,7 +96,7 @@ if (has('gh') && await yes('  要设置吗？')) {
 
 console.log('\n3/4 后台服务');
 if (isMac && await yes('  设为开机自启（后台常驻，崩溃自动重启）？')) {
-  run('bash', [path.join(DIR, 'service.sh'), 'install'], { stdio: 'inherit' });
+  run('bash', [path.join(DIR, 'scripts', 'service.sh'), 'install'], { stdio: 'inherit' });
 } else {
   console.log('  手动启动：npm run public（外网）或 npm start（仅局域网）');
 }
@@ -109,6 +109,6 @@ if (await yes('  要再加一层 Authenticator 二次验证吗（Google / Micros
 
 console.log(`
 完成！还差两步：
-  1. 用 ${isMac ? './start-cursor.sh' : 'powershell -ExecutionPolicy Bypass -File .\\start-cursor.ps1'} 重启 Cursor（带调试端口），手机才能控制它。
+  1. 用 ${isMac ? './scripts/start-cursor.sh' : 'powershell -ExecutionPolicy Bypass -File .\\scripts\\start-cursor.ps1'} 重启 Cursor（带调试端口），手机才能控制它。
   2. 运行 npm run pair，用手机扫码配对。以后每台新手机都这样配对一次。`);
 rl.close();

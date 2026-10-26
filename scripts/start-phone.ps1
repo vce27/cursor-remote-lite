@@ -1,6 +1,6 @@
-# One-click phone remote on Windows: ensure Cursor has a CDP port, then start the relay.
+﻿# One-click phone remote on Windows: ensure Cursor has a CDP port, then start the relay.
 # Run outside Cursor's terminal (so it survives Cursor restarts):
-#   powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
+#   powershell -ExecutionPolicy Bypass -File .\scripts\start-phone.ps1
 #
 # Optional env:
 #   CR_RELAY_URL / config.json relayUrl  — ChmlFrp (or other) public URL; enables --relay
@@ -11,7 +11,7 @@ param(
   [string]$RelayUrl = $env:CR_RELAY_URL
 )
 $ErrorActionPreference = 'Stop'
-$Root = $PSScriptRoot
+$Root = Split-Path $PSScriptRoot -Parent
 $DataDir = Join-Path $HOME '.cursor-remote-lite'
 $StateFile = Join-Path $DataDir 'state.json'
 $ConfigFile = Join-Path $DataDir 'config.json'
@@ -74,7 +74,7 @@ if (-not $SkipCursor) {
     if (-not $launchPort) { $launchPort = '9333' }
     Write-Host "未检测到带调试端口的 Cursor，将用端口 $launchPort 重启 Cursor…"
     $env:CDP_PORT = "$launchPort"
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'start-cursor.ps1')
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'start-cursor.ps1')
     for ($i = 0; $i -lt 45; $i++) {
       Start-Sleep -Seconds 1
       $cdpPorts = Find-CursorCdpPorts

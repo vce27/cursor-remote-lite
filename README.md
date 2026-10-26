@@ -77,7 +77,7 @@
 **本项目的不足**，也写在这里：
 
 - 靠读取 Cursor 的界面实现，Cursor 大改版后可能需要跟着更新。
-- 后台服务目前只支持 macOS；Windows 上用 `start-cursor.ps1` 启动 Cursor，服务需要手动开着（见下文）。
+- 后台服务目前只支持 macOS；Windows 上用 `scripts/start-cursor.ps1` 启动 Cursor，服务需要手动开着（见下文）。
 - 免费的 Cloudflare 快速隧道没有可用性保证，偶尔会断开重连。
 
 ## 功能
@@ -131,8 +131,6 @@ npm run desktop         # 打开面板，并在桌面创建快捷方式
 
 填入 ChmlFrp 的 `relayUrl` → 保存 →「一键启动中继」。需要时点「检查 Cursor」。
 
-仍可用：`npm run phone` / `start-phone.ps1`（见下文）。
-
 **第 2 步：配对 iPhone**
 
 在桌面软件里点「生成配对二维码」，用 iPhone 相机扫码，在 **Safari** 打开。
@@ -140,8 +138,6 @@ npm run desktop         # 打开面板，并在桌面创建快捷方式
 然后：分享 → **添加到主屏幕**。不用装任何 App Store 客户端。
 
 <p align="center"><img src="docs/ui-pair.png" width="220" alt="未配对时的界面"></p>
-
-手机网页已按 Ant ERP 浅色规范重做（`app/erp.css`）。
 
 **第 3 步：开始用**
 
@@ -152,7 +148,7 @@ npm run desktop         # 打开面板，并在桌面创建快捷方式
 - 右上角「画面」切到实时画面，可以直接点 Cursor 界面上的任何东西。
 - 右上角「⋯ → 开启通知」，Agent 跑完或等你确认时手机会提醒（见下文「通知」）。
 
-以后日常：打开桌面软件 → 一键启动中继。Cursor 需带调试端口（软件里点「启动 / 检查 Cursor」，或 `start-cursor.ps1`）。
+以后日常：打开桌面软件 → 一键启动中继。Cursor 需带调试端口（软件里点「启动 / 检查 Cursor」，或 `scripts/start-cursor.ps1`）。
 
 ## 通知
 
@@ -224,12 +220,12 @@ Windows 上**最省事**（在 PowerShell 里运行，不要用 Cursor 自带终
 # 可选：把 ChmlFrp 公网地址写进配置，以后不用每次设
 # {"relayUrl":"http://你的隧道地址:端口/"}  →  %USERPROFILE%\.cursor-remote-lite\config.json
 
-powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\scripts/start-phone.ps1
 ```
 
 这一条会：检测到已有调试端口的 Cursor（支持同时开 2 个，端口自动合并），没有就帮你用空闲端口重启 Cursor；然后启动中继。窗口一直开着。另开一个终端 `npm run pair` 扫码即可。
 
-分步启动也可以：`start-cursor.ps1` → `npm run public`（或 `npm run public:relay`）。
+分步启动也可以：`scripts/start-cursor.ps1` → `npm run public`（或 `npm run public:relay`）。
 
 ### 用 ChmlFrp（或其它 frp）代替 Cloudflare
 
@@ -244,10 +240,10 @@ Cloudflare 免费快速隧道地址会变、偶尔断开。若你已有 [ChmlFrp
 
 ```powershell
 $env:CR_RELAY_URL = "http://你的隧道地址/"   # 或 https://…
-powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\scripts/start-phone.ps1
 ```
 
-或写入 `%USERPROFILE%\.cursor-remote-lite\config.json` 的 `"relayUrl"`，以后只跑 `start-phone.ps1`。
+或写入 `%USERPROFILE%\.cursor-remote-lite\config.json` 的 `"relayUrl"`，以后只跑 `scripts/start-phone.ps1`。
 
 中继只监听 `127.0.0.1`；外网流量走 frpc。两个 Cursor 窗口会出现在手机「切换窗口」列表里（带端口标记）。
 
@@ -284,14 +280,14 @@ powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
 | `npm run public:relay` | 前台运行（外网 + 外部隧道，如 ChmlFrp；需先设 `CR_RELAY_URL`） |
 | `npm run desktop:build` | 编译 `bin\CursorRemoteLite.exe` |
 | `npm run desktop` | 打开桌面面板，并创建桌面快捷方式 |
-| `npm run phone` / `start-phone.ps1` | Windows 命令行一键：Cursor 调试端口 + 中继 |
+| `npm run phone` / `scripts/start-phone.ps1` | Windows 命令行一键：Cursor 调试端口 + 中继 |
 | `npm start` | 前台运行（只在局域网） |
-| `./service.sh status / logs / uninstall` | 后台服务状态 / 日志 / 卸载 |
+| `./scripts/service.sh status / logs / uninstall` | 后台服务状态 / 日志 / 卸载 |
 | `npm run reset` | 清除所有配对、二次验证和配置（之后要重新配对） |
 
 ## 常见问题
 
-**手机上显示「未连接到 Cursor」**：Cursor 没带调试端口启动，运行 `./start-cursor.sh`（Windows 用 `start-cursor.ps1`）。
+**手机上显示「未连接到 Cursor」**：Cursor 没带调试端口启动，运行 `./scripts/start-cursor.sh`（Windows 用 `scripts/start-cursor.ps1`）。
 
 **手机上显示「电脑不在线」**：电脑睡眠 / 关机，或服务刚重启（新地址约 1 分钟后生效，会自动重试）。见上文「防睡眠」。
 
@@ -304,7 +300,7 @@ powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
 
 GitHub Actions 只在作者发布新版 APK 时用到，用户这边不会运行。
 
-**收不到通知**：先在菜单里「发一条测试通知」。测试通知收不到：安卓检查系统通知权限和后台运行权限；iPhone 确认是从桌面图标打开的。测试通知能收到、但 Agent 的提醒没来：电脑可能睡眠了，或者 Cursor 不是用 `./start-cursor.sh` 启动的。
+**收不到通知**：先在菜单里「发一条测试通知」。测试通知收不到：安卓检查系统通知权限和后台运行权限；iPhone 确认是从桌面图标打开的。测试通知能收到、但 Agent 的提醒没来：电脑可能睡眠了，或者 Cursor 不是用 `./scripts/start-cursor.sh` 启动的。
 
 **公司网络打不开**：Cloudflare 隧道走 443 端口，一般都能用；如果连 `trycloudflare.com` 都被拦，就只能在同一局域网下用 `npm start`。
 

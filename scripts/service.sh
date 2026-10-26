@@ -6,7 +6,8 @@ set -euo pipefail
 LABEL="com.cursor-remote-lite.relay"
 OLD_LABELS=("com.suchenl.cursor-remote-lite")
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$SCRIPTS/.." && pwd)"
 LOG="$HOME/.cursor-remote-lite/server.log"
 NODE="$(command -v node)"
 

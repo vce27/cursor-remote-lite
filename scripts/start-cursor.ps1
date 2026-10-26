@@ -1,6 +1,6 @@
-# Relaunch Cursor with the Chrome DevTools Protocol enabled (required for remote control). Windows version of start-cursor.sh.
+﻿# Relaunch Cursor with the Chrome DevTools Protocol enabled (required for remote control). Windows version of start-cursor.sh.
 # WARNING: this quits the running Cursor first; unsaved editors will prompt.
-# Run from PowerShell:  powershell -ExecutionPolicy Bypass -File .\start-cursor.ps1
+# Run from PowerShell:  powershell -ExecutionPolicy Bypass -File .\scripts\start-cursor.ps1
 param([switch]$Worker)
 $ErrorActionPreference = 'Stop'
 

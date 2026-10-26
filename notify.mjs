@@ -52,6 +52,22 @@ export function closeEventStreams(deviceId) {
 export const addViewer = v => viewers.add(v);
 export const removeViewer = v => viewers.delete(v);
 
+/** Live phone WebSocket sessions (for desktop panel status). */
+export function liveConnections() {
+  const byId = new Map();
+  for (const v of viewers) {
+    if (!v?.deviceId) continue;
+    const cur = byId.get(v.deviceId) || { id: v.deviceId, visible: false };
+    if (v.visible) cur.visible = true;
+    byId.set(v.deviceId, cur);
+  }
+  const devices = listDevices();
+  return [...byId.values()].map(c => {
+    const d = devices.find(x => x.id === c.id);
+    return { id: c.id, name: d?.name || c.id, visible: c.visible, lastSeen: d?.lastSeen || 0 };
+  });
+}
+
 const watching = (deviceId, targetId) => [...viewers].some(v => v.deviceId === deviceId && v.visible && v.targetId === targetId);
 const wanted = () => streams.size > 0 || listDevices().some(d => d.push);
 

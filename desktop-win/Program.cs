@@ -1,10 +1,30 @@
 using System.Diagnostics;
+using System.Drawing.Drawing2D;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace CursorRemoteLite;
+
+// Colors from RustStor System Manager (--rs-* at http://10.10.3.19:8080).
+static class Rs
+{
+  public static readonly Color Primary = Color.FromArgb(0, 122, 255);       // --rs-primary
+  public static readonly Color Green = Color.FromArgb(52, 199, 89);         // --rs-green
+  public static readonly Color Red = Color.FromArgb(255, 77, 79);           // --rs-red
+  public static readonly Color Warning = Color.FromArgb(240, 180, 41);      // --rs-warning
+  public static readonly Color Text = Color.FromArgb(224, 0, 0, 0);         // --rs-text ~.88
+  public static readonly Color TextSecondary = Color.FromArgb(115, 0, 0, 0); // --rs-text-secondary ~.45
+  public static readonly Color TextTertiary = Color.FromArgb(105, 115, 134); // --rs-text-tertiary
+  public static readonly Color Border = Color.FromArgb(217, 217, 217);      // --rs-border
+  public static readonly Color Split = Color.FromArgb(240, 240, 240);       // --rs-split
+  public static readonly Color Bg = Color.FromArgb(245, 246, 248);          // --rs-bg
+  public static readonly Color Surface = Color.White;                      // --rs-surface
+  public static readonly Color NavActive = Color.FromArgb(230, 244, 255);   // --rs-nav-active
+  public const int ControlH = 32;
+  public const int Radius = 8;
+}
 
 static class Program
 {
@@ -13,6 +33,36 @@ static class Program
   {
     ApplicationConfiguration.Initialize();
     Application.Run(new MainForm());
+  }
+}
+
+sealed class RsCard : Panel
+{
+  public RsCard()
+  {
+    BackColor = Rs.Surface;
+    Padding = new Padding(16);
+  }
+
+  protected override void OnPaint(PaintEventArgs e)
+  {
+    base.OnPaint(e);
+    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+    using var path = RoundRect(ClientRectangle, Rs.Radius);
+    using var pen = new Pen(Rs.Split);
+    e.Graphics.DrawPath(pen, path);
+  }
+
+  static GraphicsPath RoundRect(Rectangle r, int radius)
+  {
+    var d = radius * 2;
+    var path = new GraphicsPath();
+    path.AddArc(r.X, r.Y, d, d, 180, 90);
+    path.AddArc(r.Right - d - 1, r.Y, d, d, 270, 90);
+    path.AddArc(r.Right - d - 1, r.Bottom - d - 1, d, d, 0, 90);
+    path.AddArc(r.X, r.Bottom - d - 1, d, d, 90, 90);
+    path.CloseFigure();
+    return path;
   }
 }
 
@@ -29,9 +79,14 @@ sealed class MainForm : Form
   Process? _relay;
   string _lang = "zh";
 
+  readonly Panel _appBar = new();
+  readonly Label _brandMark = new();
   readonly Label _title = new();
   readonly Label _desc = new();
+  readonly Button _btnLang = new();
   readonly Label _status = new();
+  readonly Label _phone = new();
+  readonly RsCard _relayCard = new();
   readonly Label _urlLabel = new();
   readonly Label _urlHint = new();
   readonly TextBox _urlBox = new();
@@ -39,6 +94,7 @@ sealed class MainForm : Form
   readonly Button _btnCursor = new();
   readonly Button _btnStop = new();
   readonly Button _btnStart = new();
+  readonly RsCard _pairCard = new();
   readonly Label _pairTitle = new();
   readonly PictureBox _qr = new();
   readonly TextBox _linkBox = new();
@@ -46,8 +102,9 @@ sealed class MainForm : Form
   readonly Button _btnCopy = new();
   readonly Label _pairHint = new();
   readonly Label _toast = new();
-  readonly Button _btnLang = new();
-  readonly System.Windows.Forms.Timer _timer = new() { Interval = 2500 };
+  readonly System.Windows.Forms.Timer _timer = new() { Interval = 2000 };
+  readonly HttpClient _http = new() { Timeout = TimeSpan.FromMilliseconds(400) };
+  int _statusBusy;
 
   public MainForm()
   {
@@ -57,26 +114,68 @@ sealed class MainForm : Form
     _lang = ReadLang();
 
     Text = "Cursor Remote Lite";
-    ClientSize = new Size(560, 680);
+    ClientSize = new Size(600, 720);
     StartPosition = FormStartPosition.CenterScreen;
-    BackColor = Color.FromArgb(245, 245, 245);
+    BackColor = Rs.Bg;
     Font = new Font("Microsoft YaHei UI", 9f);
+    ForeColor = Rs.Text;
     FormBorderStyle = FormBorderStyle.FixedSingle;
     MaximizeBox = false;
 
-    _title.Font = new Font(Font, FontStyle.Bold);
-    _title.Location = new Point(24, 16);
+    BuildAppBar();
+    BuildStatus();
+    BuildRelayCard();
+    BuildPairCard();
+
+    _toast.Location = new Point(20, 684);
+    _toast.Size = new Size(560, 22);
+    _toast.ForeColor = Rs.Primary;
+
+    Controls.AddRange([_appBar, _status, _phone, _relayCard, _pairCard, _toast]);
+
+    _timer.Tick += async (_, _) => await RefreshStatusAsync();
+    _timer.Start();
+    ApplyLang();
+    _ = RefreshStatusAsync();
+    FormClosing += (_, _) =>
+    {
+      _timer.Stop();
+      StopRelay();
+      _http.Dispose();
+    };
+  }
+
+  void BuildAppBar()
+  {
+    _appBar.Location = new Point(0, 0);
+    _appBar.Size = new Size(600, 56);
+    _appBar.BackColor = Rs.Surface;
+    _appBar.Paint += (_, e) =>
+    {
+      using var pen = new Pen(Rs.Split);
+      e.Graphics.DrawLine(pen, 0, _appBar.Height - 1, _appBar.Width, _appBar.Height - 1);
+    };
+
+    _brandMark.Text = "CR";
+    _brandMark.Font = new Font(Font.FontFamily, 9f, FontStyle.Bold);
+    _brandMark.ForeColor = Color.White;
+    _brandMark.BackColor = Rs.Primary;
+    _brandMark.TextAlign = ContentAlignment.MiddleCenter;
+    _brandMark.Location = new Point(16, 14);
+    _brandMark.Size = new Size(28, 28);
+
+    _title.Font = new Font(Font.FontFamily, 11f, FontStyle.Bold);
+    _title.ForeColor = Rs.Text;
+    _title.Location = new Point(52, 8);
     _title.AutoSize = true;
 
-    _desc.ForeColor = Color.FromArgb(105, 115, 134);
-    _desc.Location = new Point(24, 42);
-    _desc.Size = new Size(420, 36);
+    _desc.ForeColor = Rs.TextTertiary;
+    _desc.Location = new Point(52, 30);
+    _desc.Size = new Size(420, 20);
 
-    _btnLang.Size = new Size(88, 32);
-    _btnLang.Location = new Point(448, 16);
-    _btnLang.FlatStyle = FlatStyle.Flat;
-    _btnLang.BackColor = Color.White;
-    _btnLang.FlatAppearance.BorderColor = Color.FromArgb(217, 217, 217);
+    StyleGhost(_btnLang);
+    _btnLang.Size = new Size(72, Rs.ControlH);
+    _btnLang.Location = new Point(512, 12);
     _btnLang.Click += (_, _) =>
     {
       _lang = _lang == "zh" ? "en" : "zh";
@@ -84,75 +183,106 @@ sealed class MainForm : Form
       ApplyLang();
     };
 
-    _status.Location = new Point(24, 84);
-    _status.Size = new Size(510, 22);
+    _appBar.Controls.AddRange([_brandMark, _title, _desc, _btnLang]);
+  }
 
-    _urlLabel.Location = new Point(24, 118);
+  void BuildStatus()
+  {
+    _status.Location = new Point(20, 68);
+    _status.Size = new Size(560, 22);
+    _phone.Location = new Point(20, 90);
+    _phone.Size = new Size(560, 22);
+  }
+
+  void BuildRelayCard()
+  {
+    _relayCard.Location = new Point(20, 120);
+    _relayCard.Size = new Size(560, 200);
+
+    _urlLabel.Location = new Point(16, 14);
     _urlLabel.AutoSize = true;
+    _urlLabel.ForeColor = Rs.Text;
 
-    _urlBox.Location = new Point(24, 144);
-    _urlBox.Size = new Size(400, 28);
+    _urlBox.Location = new Point(16, 40);
+    _urlBox.Size = new Size(420, Rs.ControlH);
+    _urlBox.BorderStyle = BorderStyle.FixedSingle;
+    _urlBox.BackColor = Rs.Surface;
+    _urlBox.ForeColor = Rs.Text;
     _urlBox.Text = GetRelayUrl();
 
     StyleSecondary(_btnSave);
-    _btnSave.Location = new Point(436, 142);
-    _btnSave.Size = new Size(100, 32);
+    _btnSave.Location = new Point(444, 38);
+    _btnSave.Size = new Size(100, Rs.ControlH);
     _btnSave.Click += (_, _) =>
     {
       try { SaveRelayUrl(_urlBox.Text); Toast(T("saved")); }
       catch (Exception ex) { Toast(ex.Message, true); }
     };
 
-    _urlHint.ForeColor = Color.FromArgb(105, 115, 134);
-    _urlHint.Location = new Point(24, 178);
-    _urlHint.Size = new Size(510, 36);
+    _urlHint.ForeColor = Rs.TextTertiary;
+    _urlHint.Location = new Point(16, 76);
+    _urlHint.Size = new Size(528, 36);
 
     StyleSecondary(_btnCursor);
-    _btnCursor.Location = new Point(24, 226);
-    _btnCursor.Size = new Size(120, 32);
+    _btnCursor.Location = new Point(16, 128);
+    _btnCursor.Size = new Size(120, Rs.ControlH);
     _btnCursor.Click += async (_, _) =>
     {
-      try { Toast(await EnsureCursorAsync()); RefreshStatus(); }
+      try { Toast(await EnsureCursorAsync()); await RefreshStatusAsync(); }
       catch (Exception ex) { Toast(ex.Message, true); }
     };
 
     StyleSecondary(_btnStop);
-    _btnStop.Location = new Point(156, 226);
-    _btnStop.Size = new Size(120, 32);
-    _btnStop.Click += (_, _) =>
+    _btnStop.Location = new Point(148, 128);
+    _btnStop.Size = new Size(120, Rs.ControlH);
+    _btnStop.Click += async (_, _) =>
     {
-      try { StopRelay(); Toast(T("stopped")); RefreshStatus(); }
+      try { StopRelay(); Toast(T("stopped")); await RefreshStatusAsync(); }
       catch (Exception ex) { Toast(ex.Message, true); }
     };
 
     StylePrimary(_btnStart);
-    _btnStart.Location = new Point(288, 226);
-    _btnStart.Size = new Size(140, 32);
+    _btnStart.Location = new Point(280, 128);
+    _btnStart.Size = new Size(148, Rs.ControlH);
     _btnStart.Click += async (_, _) =>
     {
-      try { Toast(await StartRelayAsync()); RefreshStatus(); }
+      try { Toast(await StartRelayAsync()); await RefreshStatusAsync(); }
       catch (Exception ex) { Toast(ex.Message, true); }
     };
 
+    _relayCard.Controls.AddRange([
+      _urlLabel, _urlBox, _btnSave, _urlHint, _btnCursor, _btnStop, _btnStart
+    ]);
+  }
+
+  void BuildPairCard()
+  {
+    _pairCard.Location = new Point(20, 336);
+    _pairCard.Size = new Size(560, 332);
+
     _pairTitle.Font = new Font(Font, FontStyle.Bold);
-    _pairTitle.Location = new Point(24, 278);
+    _pairTitle.ForeColor = Rs.Text;
+    _pairTitle.Location = new Point(16, 14);
     _pairTitle.AutoSize = true;
 
-    _qr.Location = new Point(24, 308);
-    _qr.Size = new Size(240, 240);
+    _qr.Location = new Point(16, 48);
+    _qr.Size = new Size(220, 220);
     _qr.BorderStyle = BorderStyle.FixedSingle;
     _qr.SizeMode = PictureBoxSizeMode.Zoom;
-    _qr.BackColor = Color.White;
+    _qr.BackColor = Rs.Surface;
 
-    _linkBox.Location = new Point(280, 308);
-    _linkBox.Size = new Size(256, 120);
+    _linkBox.Location = new Point(252, 48);
+    _linkBox.Size = new Size(292, 120);
     _linkBox.Multiline = true;
     _linkBox.ReadOnly = true;
     _linkBox.ScrollBars = ScrollBars.Vertical;
+    _linkBox.BorderStyle = BorderStyle.FixedSingle;
+    _linkBox.BackColor = Rs.Bg;
+    _linkBox.ForeColor = Rs.Text;
 
     StylePrimary(_btnPair);
-    _btnPair.Location = new Point(280, 448);
-    _btnPair.Size = new Size(140, 32);
+    _btnPair.Location = new Point(252, 184);
+    _btnPair.Size = new Size(160, Rs.ControlH);
     _btnPair.Click += async (_, _) =>
     {
       try
@@ -173,8 +303,8 @@ sealed class MainForm : Form
     };
 
     StyleSecondary(_btnCopy);
-    _btnCopy.Location = new Point(430, 448);
-    _btnCopy.Size = new Size(106, 32);
+    _btnCopy.Location = new Point(424, 184);
+    _btnCopy.Size = new Size(120, Rs.ControlH);
     _btnCopy.Click += (_, _) =>
     {
       if (!string.IsNullOrWhiteSpace(_linkBox.Text))
@@ -184,40 +314,41 @@ sealed class MainForm : Form
       }
     };
 
-    _pairHint.ForeColor = Color.FromArgb(105, 115, 134);
-    _pairHint.Location = new Point(280, 490);
-    _pairHint.Size = new Size(256, 48);
+    _pairHint.ForeColor = Rs.TextTertiary;
+    _pairHint.Location = new Point(252, 228);
+    _pairHint.Size = new Size(292, 48);
 
-    _toast.Location = new Point(24, 630);
-    _toast.Size = new Size(510, 22);
-    _toast.ForeColor = Color.FromArgb(0, 122, 255);
-
-    Controls.AddRange([
-      _title, _desc, _btnLang, _status, _urlLabel, _urlBox, _btnSave, _urlHint,
-      _btnCursor, _btnStop, _btnStart, _pairTitle, _qr, _linkBox, _btnPair, _btnCopy, _pairHint, _toast
+    _pairCard.Controls.AddRange([
+      _pairTitle, _qr, _linkBox, _btnPair, _btnCopy, _pairHint
     ]);
-
-    _timer.Tick += (_, _) => RefreshStatus();
-    _timer.Start();
-    ApplyLang();
-    RefreshStatus();
-    FormClosing += (_, _) => _timer.Stop();
   }
 
   static void StylePrimary(Button b)
   {
     b.FlatStyle = FlatStyle.Flat;
-    b.BackColor = Color.FromArgb(0, 122, 255);
+    b.BackColor = Rs.Primary;
     b.ForeColor = Color.White;
-    b.FlatAppearance.BorderColor = Color.FromArgb(0, 122, 255);
+    b.FlatAppearance.BorderColor = Rs.Primary;
+    b.FlatAppearance.BorderSize = 0;
+    b.Cursor = Cursors.Hand;
   }
 
   static void StyleSecondary(Button b)
   {
     b.FlatStyle = FlatStyle.Flat;
-    b.BackColor = Color.White;
-    b.ForeColor = Color.FromArgb(0, 0, 0, 222);
-    b.FlatAppearance.BorderColor = Color.FromArgb(217, 217, 217);
+    b.BackColor = Rs.Surface;
+    b.ForeColor = Rs.Text;
+    b.FlatAppearance.BorderColor = Rs.Border;
+    b.Cursor = Cursors.Hand;
+  }
+
+  static void StyleGhost(Button b)
+  {
+    b.FlatStyle = FlatStyle.Flat;
+    b.BackColor = Rs.Surface;
+    b.ForeColor = Rs.Primary;
+    b.FlatAppearance.BorderColor = Rs.Border;
+    b.Cursor = Cursors.Hand;
   }
 
   string T(string key) => (_lang == "en" ? En : Zh)[key];
@@ -225,8 +356,8 @@ sealed class MainForm : Form
   static readonly Dictionary<string, string> Zh = new()
   {
     ["title"] = "Cursor Remote Lite",
-    ["desc"] = "电脑端面板 · iPhone 用 Safari 扫码，添加到主屏幕（不用装 App）",
-    ["lang"] = "English",
+    ["desc"] = "电脑端面板 · iPhone Safari 扫码添加到主屏幕",
+    ["lang"] = "EN",
     ["urlLabel"] = "公网地址（relayUrl）",
     ["urlHint"] = "http:// 也可以；配对会打开中继本身，避免混合内容拦截",
     ["save"] = "保存",
@@ -242,16 +373,20 @@ sealed class MainForm : Form
     ["saved"] = "已保存公网地址",
     ["stopped"] = "已停止中继",
     ["copied"] = "已复制配对链接",
-    ["online"] = "状态：在线  端口 {0}  Cursor CDP {1}",
-    ["starting"] = "状态：启动中…  Cursor CDP {0}",
-    ["offline"] = "状态：已停止  Cursor CDP {0}",
+    ["online"] = "中继在线 · 端口 {0} · Cursor CDP {1}",
+    ["starting"] = "中继启动中… · Cursor CDP {0}",
+    ["offline"] = "中继已停止 · Cursor CDP {0}",
     ["cdpNone"] = "未检测到",
+    ["phoneConnected"] = "手机已连接 · {0}",
+    ["phonePairedOffline"] = "已配对 {0} 台 · 当前未打开",
+    ["phoneNone"] = "尚未配对手机",
+    ["phoneRelayOff"] = "手机：中继未启动",
   };
 
   static readonly Dictionary<string, string> En = new()
   {
     ["title"] = "Cursor Remote Lite",
-    ["desc"] = "Desktop panel · iPhone: Safari scan QR, Add to Home Screen",
+    ["desc"] = "Desktop panel · iPhone Safari → Add to Home Screen",
     ["lang"] = "中文",
     ["urlLabel"] = "Public URL (relayUrl)",
     ["urlHint"] = "http:// is OK — pairing opens the relay itself",
@@ -268,10 +403,14 @@ sealed class MainForm : Form
     ["saved"] = "Saved relayUrl",
     ["stopped"] = "Relay stopped",
     ["copied"] = "Link copied",
-    ["online"] = "Status: ONLINE  port {0}  Cursor CDP {1}",
-    ["starting"] = "Status: starting…  Cursor CDP {0}",
-    ["offline"] = "Status: OFF  Cursor CDP {0}",
+    ["online"] = "Relay online · port {0} · Cursor CDP {1}",
+    ["starting"] = "Relay starting… · Cursor CDP {0}",
+    ["offline"] = "Relay off · Cursor CDP {0}",
     ["cdpNone"] = "none",
+    ["phoneConnected"] = "Phone connected · {0}",
+    ["phonePairedOffline"] = "{0} paired · not open now",
+    ["phoneNone"] = "No phone paired yet",
+    ["phoneRelayOff"] = "Phone: relay offline",
   };
 
   void ApplyLang()
@@ -289,35 +428,96 @@ sealed class MainForm : Form
     _btnPair.Text = T("pair");
     _btnCopy.Text = T("copy");
     if (string.IsNullOrEmpty(_linkBox.Text)) _pairHint.Text = T("pairHint");
-    RefreshStatus();
+    _ = RefreshStatusAsync();
   }
 
   void Toast(string msg, bool err = false)
   {
     _toast.Text = msg;
-    _toast.ForeColor = err ? Color.FromArgb(255, 77, 79) : Color.FromArgb(0, 122, 255);
+    _toast.ForeColor = err ? Rs.Red : Rs.Primary;
   }
 
-  void RefreshStatus()
+  async Task RefreshStatusAsync()
   {
-    var listening = PortOpen(_port);
-    var alive = _relay is { HasExited: false };
-    var cdp = ScanCdp();
-    var cdpText = cdp.Count > 0 ? string.Join(" ", cdp.Select(x => ":" + x)) : T("cdpNone");
-    if (listening)
+    if (Interlocked.Exchange(ref _statusBusy, 1) == 1) return;
+    try
     {
-      _status.Text = string.Format(T("online"), _port, cdpText);
-      _status.ForeColor = Color.FromArgb(19, 82, 0);
+      var port = _port;
+      var alive = _relay is { HasExited: false };
+      var (listening, cdp, phone) = await Task.Run(async () =>
+      {
+        var listen = PortOpen(port);
+        var ports = await ScanCdpAsync().ConfigureAwait(false);
+        string? phoneJson = null;
+        if (listen)
+        {
+          try { phoneJson = await _http.GetStringAsync($"http://127.0.0.1:{port}/api/desktop").ConfigureAwait(false); }
+          catch { }
+        }
+        return (listen, ports, phoneJson);
+      }).ConfigureAwait(true);
+
+      var cdpText = cdp.Count > 0 ? string.Join(" ", cdp.Select(x => ":" + x)) : T("cdpNone");
+      if (listening)
+      {
+        _status.Text = string.Format(T("online"), _port, cdpText);
+        _status.ForeColor = Rs.Green;
+      }
+      else if (alive)
+      {
+        _status.Text = string.Format(T("starting"), cdpText);
+        _status.ForeColor = Rs.Warning;
+      }
+      else
+      {
+        _status.Text = string.Format(T("offline"), cdpText);
+        _status.ForeColor = Rs.TextSecondary;
+      }
+      ApplyPhoneStatus(listening, phone);
     }
-    else if (alive)
+    finally { Interlocked.Exchange(ref _statusBusy, 0); }
+  }
+
+  void ApplyPhoneStatus(bool relayListening, string? json)
+  {
+    if (!relayListening || string.IsNullOrEmpty(json))
     {
-      _status.Text = string.Format(T("starting"), cdpText);
-      _status.ForeColor = Color.FromArgb(173, 104, 0);
+      _phone.Text = T("phoneRelayOff");
+      _phone.ForeColor = Rs.TextTertiary;
+      return;
     }
-    else
+    try
     {
-      _status.Text = string.Format(T("offline"), cdpText);
-      _status.ForeColor = Color.Black;
+      using var doc = JsonDocument.Parse(json);
+      var root = doc.RootElement;
+      var paired = root.TryGetProperty("paired", out var p) ? p.GetInt32() : 0;
+      var online = root.TryGetProperty("online", out var o) ? o.GetInt32() : 0;
+      if (online > 0 && root.TryGetProperty("phones", out var phones) && phones.ValueKind == JsonValueKind.Array)
+      {
+        var names = phones.EnumerateArray()
+          .Select(x => x.TryGetProperty("name", out var n) ? n.GetString() : null)
+          .Where(s => !string.IsNullOrWhiteSpace(s))
+          .Distinct()
+          .ToList();
+        var label = names.Count > 0 ? string.Join("、", names) : online.ToString();
+        _phone.Text = string.Format(T("phoneConnected"), label);
+        _phone.ForeColor = Rs.Green;
+      }
+      else if (paired > 0)
+      {
+        _phone.Text = string.Format(T("phonePairedOffline"), paired);
+        _phone.ForeColor = Rs.Warning;
+      }
+      else
+      {
+        _phone.Text = T("phoneNone");
+        _phone.ForeColor = Rs.TextTertiary;
+      }
+    }
+    catch
+    {
+      _phone.Text = T("phoneRelayOff");
+      _phone.ForeColor = Rs.TextTertiary;
     }
   }
 
@@ -333,7 +533,6 @@ sealed class MainForm : Form
       if (File.Exists(Path.Combine(dir.FullName, "server.mjs")))
         return dir.FullName;
     }
-    // published next to repo\bin or repo\desktop-win\bin
     var fallback = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", ".."));
     return File.Exists(Path.Combine(fallback, "server.mjs")) ? fallback : AppContext.BaseDirectory;
   }
@@ -380,17 +579,12 @@ sealed class MainForm : Form
   {
     var trimmed = url.Trim();
     var cfg = ReadJson(ConfigPath);
-    var st = ReadJson(StatePath);
     if (string.IsNullOrEmpty(trimmed))
-    {
       cfg.Remove("relayUrl");
-    }
     else
     {
       if (!trimmed.EndsWith('/')) trimmed += "/";
       cfg["relayUrl"] = trimmed;
-      st["relayUrl"] = trimmed;
-      WriteJson(StatePath, st);
     }
     WriteJson(ConfigPath, cfg);
   }
@@ -401,58 +595,43 @@ sealed class MainForm : Form
     {
       using var c = new TcpClient();
       var ar = c.BeginConnect("127.0.0.1", port, null, null);
-      if (!ar.AsyncWaitHandle.WaitOne(200)) return false;
+      if (!ar.AsyncWaitHandle.WaitOne(80)) return false;
       c.EndConnect(ar);
       return true;
     }
     catch { return false; }
   }
 
-  static bool ProbeCdp(int port)
+  async Task<bool> ProbeCdpAsync(int port)
   {
+    if (!PortOpen(port)) return false;
     try
     {
-      using var http = new HttpClient { Timeout = TimeSpan.FromMilliseconds(400) };
-      var body = http.GetStringAsync($"http://127.0.0.1:{port}/json/version").GetAwaiter().GetResult();
+      var body = await _http.GetStringAsync($"http://127.0.0.1:{port}/json/version").ConfigureAwait(false);
       return body.Contains("Cursor") || body.Contains("Chrome");
     }
     catch { return false; }
   }
 
-  static List<int> ScanCdp()
+  async Task<List<int>> ScanCdpAsync()
   {
     int[] ports = [9333, 9222, 9223, 9224];
-    return ports.Where(ProbeCdp).ToList();
-  }
-
-  void KillRelayListeners()
-  {
-    try
-    {
-      Process.Start(new ProcessStartInfo
-      {
-        FileName = "powershell",
-        Arguments = $"-NoProfile -Command \"Get-NetTCPConnection -LocalPort {_port} -State Listen -EA SilentlyContinue | ForEach-Object {{ $p=Get-Process -Id $_.OwningProcess -EA SilentlyContinue; if($p -and $p.ProcessName -eq 'node'){{ Stop-Process -Id $p.Id -Force -EA SilentlyContinue }} }}\"",
-        CreateNoWindow = true,
-        UseShellExecute = false,
-      })?.WaitForExit(3000);
-    }
-    catch { }
+    var hits = await Task.WhenAll(ports.Select(async p => (p, ok: await ProbeCdpAsync(p).ConfigureAwait(false))));
+    return hits.Where(x => x.ok).Select(x => x.p).ToList();
   }
 
   void StopRelay()
   {
     try { _relay?.Kill(entireProcessTree: true); } catch { }
     _relay = null;
-    KillRelayListeners();
   }
 
   async Task<string> StartRelayAsync()
   {
     StopRelay();
-    await Task.Delay(400);
+    await Task.Delay(150);
     var url = GetRelayUrl();
-    if (string.IsNullOrWhiteSpace(_urlBox.Text) == false && _urlBox.Text.Trim() != url)
+    if (!string.IsNullOrWhiteSpace(_urlBox.Text) && _urlBox.Text.Trim() != url)
       SaveRelayUrl(_urlBox.Text);
     url = GetRelayUrl();
 
@@ -460,7 +639,7 @@ sealed class MainForm : Form
     if (!File.Exists(server))
       throw new Exception("server.mjs not found: " + _repoRoot);
 
-    var cdp = ScanCdp();
+    var cdp = await ScanCdpAsync();
     var psi = new ProcessStartInfo
     {
       FileName = "node",
@@ -494,11 +673,11 @@ sealed class MainForm : Form
 
   async Task<string> EnsureCursorAsync()
   {
-    var existing = ScanCdp();
+    var existing = await ScanCdpAsync();
     if (existing.Count > 0) return "CDP: " + string.Join(", ", existing);
 
-    var script = Path.Combine(_repoRoot, "start-cursor.ps1");
-    if (!File.Exists(script)) throw new Exception("start-cursor.ps1 not found");
+    var script = Path.Combine(_repoRoot, "scripts", "start-cursor.ps1");
+    if (!File.Exists(script)) throw new Exception("scripts/start-cursor.ps1 not found");
 
     var psi = new ProcessStartInfo
     {
@@ -513,8 +692,8 @@ sealed class MainForm : Form
     await p.WaitForExitAsync();
     for (var i = 0; i < 30; i++)
     {
-      await Task.Delay(1000);
-      var ports = ScanCdp();
+      await Task.Delay(500);
+      var ports = await ScanCdpAsync();
       if (ports.Count > 0) return "Cursor CDP ready";
     }
     throw new Exception("Cursor CDP not ready");
@@ -522,8 +701,8 @@ sealed class MainForm : Form
 
   async Task<JsonElement> CreatePairLinkAsync()
   {
-    var script = Path.Combine(_repoRoot, "desktop", "pair-link.mjs");
-    if (!File.Exists(script)) throw new Exception("desktop/pair-link.mjs not found");
+    var script = Path.Combine(_repoRoot, "pair-link.mjs");
+    if (!File.Exists(script)) throw new Exception("pair-link.mjs not found");
     var psi = new ProcessStartInfo
     {
       FileName = "node",

@@ -1,15 +1,8 @@
 node_modules/
 .DS_Store
 *.log
-android/.gradle/
-android/build/
-android/app/build/
-android/local.properties
 *.p12
 *.jks
-desktop/dist/
-desktop/src-tauri/target/
-desktop-electron/dist/
 desktop-win/bin/
 desktop-win/obj/
 bin/
