@@ -115,39 +115,33 @@ Cursor 基于 Electron，用 `--remote-debugging-port` 启动后，中继通过 
 - [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)：外网访问，`brew install cloudflared`
 - [GitHub CLI](https://cli.github.com/)：固定地址，`brew install gh`
 
-## 快速上手（5 分钟）
+## 快速上手（Windows + iPhone，推荐）
 
-**第 1 步：在电脑上安装**
+**第 1 步：电脑安装依赖并打开桌面软件**
 
-```bash
-git clone https://github.com/Suchenl/cursor-remote-lite.git
+```powershell
+git clone https://github.com/vce27/cursor-remote-lite.git
 cd cursor-remote-lite
 npm install
-npm run setup        # 创建手机 App 仓库、设置开机自启，可选开启二次验证
-./start-cursor.sh    # 让 Cursor 带调试端口重启（会先退出当前 Cursor）
+npm run desktop
+# 或：powershell -ExecutionPolicy Bypass -File .\start-desktop.ps1
 ```
 
-`npm run setup` 会在**你自己的** GitHub 账号下创建一个公开仓库（默认叫 `cursor-remote-app`），用 GitHub Pages 托管手机 App 和加密过的电脑地址。每个人用自己的，和作者或其他用户都没有关系。
+会打开 **Cursor Remote Lite** 面板（WinForms，无需再装 Electron）。填入 ChmlFrp 的 `relayUrl` → 保存 →「一键启动中继」。需要时点「检查 Cursor」。
 
-**第 2 步：配对手机**
+仍可用：`npm run phone` / `start-phone.ps1`（见下文）。
 
-```bash
-npm run pair
-```
+**第 2 步：配对 iPhone**
 
-终端里会出现一个二维码（10 分钟内有效，只能用一次）。用手机相机或浏览器扫码打开即可，没有密码要输。
-扫不了码的话，把二维码下面的链接发到手机上打开（或者粘贴到 App 的输入框里）。
+在桌面软件里点「生成配对二维码」，用 iPhone 相机扫码，在 **Safari** 打开。
+
+然后：分享 → **添加到主屏幕**。不用装任何 App Store 客户端。
 
 <p align="center"><img src="docs/ui-pair.png" width="220" alt="未配对时的界面"></p>
 
-**第 3 步：装到手机上（可选，但推荐）**
+手机网页已按 Ant ERP 浅色规范重做（`app/erp.css`）。
 
-- **iPhone**：Safari 打开后 → 分享 → 添加到主屏幕
-- **Android**：下载 [CursorRemote.apk](https://github.com/Suchenl/cursor-remote-lite/releases/latest/download/CursorRemote.apk) 安装，然后用手机扫配对码，浏览器会提示「在 App 中打开」，点一下就配对进 App 了（配对码用过了就再运行一次 `npm run pair`）。
-  华为等没有谷歌服务的手机也能用（浏览器的「安装应用」在这些手机上通常不可用）。
-  注意：纯血鸿蒙（HarmonyOS NEXT / 5.0 及以上）不能直接装 APK，需要先装「卓易通」。
-
-**第 4 步：开始用**
+**第 3 步：开始用**
 
 - 左上角是当前窗口，点它切换窗口（本地 / SSH / Agents）。
 - 底部输入框发消息；`Agent ▾` / `Auto ▾` 切模式和模型；「历史」打开以前的对话，「＋ 新建」开新对话。
@@ -156,7 +150,7 @@ npm run pair
 - 右上角「画面」切到实时画面，可以直接点 Cursor 界面上的任何东西。
 - 右上角「⋯ → 开启通知」，Agent 跑完或等你确认时手机会提醒（见下文「通知」）。
 
-以后每次 Cursor 重启都要带调试端口，用 `./start-cursor.sh` 启动即可。
+以后日常：打开桌面软件 → 一键启动中继。Cursor 需带调试端口（软件里点「启动 / 检查 Cursor」，或 `start-cursor.ps1`）。
 
 ## 通知
 
@@ -286,7 +280,8 @@ powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
 | `npm run 2fa` | 开启 / 重新绑定 Authenticator 二次验证；`npm run 2fa off` 关闭；`npm run 2fa status` 查看 |
 | `npm run public` | 前台运行（外网 + Cloudflare 快速隧道） |
 | `npm run public:relay` | 前台运行（外网 + 外部隧道，如 ChmlFrp；需先设 `CR_RELAY_URL`） |
-| `npm run phone` / `start-phone.ps1` | Windows 一键：检查/启动 Cursor 调试端口 + 中继（推荐） |
+| `npm run desktop` / `start-desktop.ps1` | Windows 桌面面板（推荐，免命令行） |
+| `npm run phone` / `start-phone.ps1` | Windows 命令行一键：Cursor 调试端口 + 中继 |
 | `npm start` | 前台运行（只在局域网） |
 | `./service.sh status / logs / uninstall` | 后台服务状态 / 日志 / 卸载 |
 | `npm run reset` | 清除所有配对、二次验证和配置（之后要重新配对） |

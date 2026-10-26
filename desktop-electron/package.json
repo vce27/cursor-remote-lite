@@ -1,0 +1,13 @@
+{
+  "name": "cursor-remote-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.2.0"
+  }
+}

@@ -7,3 +7,6 @@ android/app/build/
 android/local.properties
 *.p12
 *.jks
+desktop/dist/
+desktop/src-tauri/target/
+desktop-electron/dist/
