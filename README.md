@@ -123,11 +123,13 @@ Cursor 基于 Electron，用 `--remote-debugging-port` 启动后，中继通过 
 git clone https://github.com/vce27/cursor-remote-lite.git
 cd cursor-remote-lite
 npm install
-npm run desktop
-# 或：powershell -ExecutionPolicy Bypass -File .\start-desktop.ps1
+npm run desktop:build   # 生成 bin\CursorRemoteLite.exe
+npm run desktop         # 打开面板，并在桌面创建快捷方式
 ```
 
-会打开 **Cursor Remote Lite** 面板（WinForms，无需再装 Electron）。填入 ChmlFrp 的 `relayUrl` → 保存 →「一键启动中继」。需要时点「检查 Cursor」。
+之后可直接双击桌面上的 **Cursor Remote Lite** 快捷方式，或 `bin\CursorRemoteLite.exe`。面板右上角可 **中英文切换**。
+
+填入 ChmlFrp 的 `relayUrl` → 保存 →「一键启动中继」。需要时点「检查 Cursor」。
 
 仍可用：`npm run phone` / `start-phone.ps1`（见下文）。
 
@@ -280,7 +282,8 @@ powershell -ExecutionPolicy Bypass -File .\start-phone.ps1
 | `npm run 2fa` | 开启 / 重新绑定 Authenticator 二次验证；`npm run 2fa off` 关闭；`npm run 2fa status` 查看 |
 | `npm run public` | 前台运行（外网 + Cloudflare 快速隧道） |
 | `npm run public:relay` | 前台运行（外网 + 外部隧道，如 ChmlFrp；需先设 `CR_RELAY_URL`） |
-| `npm run desktop` / `start-desktop.ps1` | Windows 桌面面板（推荐，免命令行） |
+| `npm run desktop:build` | 编译 `bin\CursorRemoteLite.exe` |
+| `npm run desktop` | 打开桌面面板，并创建桌面快捷方式 |
 | `npm run phone` / `start-phone.ps1` | Windows 命令行一键：Cursor 调试端口 + 中继 |
 | `npm start` | 前台运行（只在局域网） |
 | `./service.sh status / logs / uninstall` | 后台服务状态 / 日志 / 卸载 |

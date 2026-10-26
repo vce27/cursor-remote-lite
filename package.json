@@ -11,6 +11,7 @@
     "public:relay": "node server.mjs --relay",
     "phone": "powershell -ExecutionPolicy Bypass -File ./start-phone.ps1",
     "desktop": "powershell -ExecutionPolicy Bypass -File ./start-desktop.ps1",
+    "desktop:build": "dotnet publish desktop-win/CursorRemoteLite.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o bin",
     "desktop:electron": "npm --prefix desktop-electron start",
     "desktop:electron:install": "npm --prefix desktop-electron install",
     "desktop:tauri": "npm --prefix desktop run tauri -- dev",

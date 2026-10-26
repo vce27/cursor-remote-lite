@@ -10,3 +10,7 @@ android/local.properties
 desktop/dist/
 desktop/src-tauri/target/
 desktop-electron/dist/
+desktop-win/bin/
+desktop-win/obj/
+bin/
+*.lnk
