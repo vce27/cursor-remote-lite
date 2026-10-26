@@ -1,5 +1,5 @@
-# Cursor Remote Lite — Windows desktop panel (no Electron download required)
-# powershell -ExecutionPolicy Bypass -File .\start-desktop.ps1
+﻿# Cursor Remote Lite - Windows desktop panel
+# Usage: powershell -ExecutionPolicy Bypass -File .\start-desktop.ps1
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $ErrorActionPreference = 'Stop'
@@ -23,9 +23,9 @@ function Write-Json($path, $obj) {
 function Get-RelayUrl {
   $cfg = Read-Json $ConfigFile
   $st = Read-Json $StateFile
-  if ($cfg.relayUrl) { return [string]$cfg.relayUrl }
-  if ($st.relayUrl) { return [string]$st.relayUrl }
-  ''
+  if ($cfg -and $cfg.relayUrl) { return [string]$cfg.relayUrl }
+  if ($st -and $st.relayUrl) { return [string]$st.relayUrl }
+  return ''
 }
 function Save-RelayUrl([string]$url) {
   $trimmed = $url.Trim()
@@ -34,7 +34,7 @@ function Save-RelayUrl([string]$url) {
   $st = Read-Json $StateFile
   if (-not $st) { $st = [pscustomobject]@{} }
   if (-not $trimmed) {
-    $cfg.PSObject.Properties.Remove('relayUrl')
+    if ($cfg.PSObject.Properties['relayUrl']) { $cfg.PSObject.Properties.Remove('relayUrl') }
   } else {
     if (-not $trimmed.EndsWith('/')) { $trimmed += '/' }
     $cfg | Add-Member -NotePropertyName relayUrl -NotePropertyValue $trimmed -Force
@@ -49,7 +49,8 @@ function Test-PortOpen([int]$p) {
     $iar = $c.BeginConnect('127.0.0.1', $p, $null, $null)
     $ok = $iar.AsyncWaitHandle.WaitOne(200, $false)
     if ($ok -and $c.Connected) { $c.Close(); return $true }
-    $c.Close(); return $false
+    try { $c.Close() } catch {}
+    return $false
   } catch { return $false }
 }
 function Test-Cdp([int]$p) {
@@ -59,7 +60,7 @@ function Test-Cdp([int]$p) {
   } catch { return $false }
 }
 function Get-CdpPorts {
-  @(9333, 9222, 9223, 9224) | Where-Object { Test-Cdp $_ }
+  return @(9333, 9222, 9223, 9224) | Where-Object { Test-Cdp $_ }
 }
 function Stop-RelayListeners {
   Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
@@ -82,37 +83,37 @@ function Start-Relay {
   $url = Get-RelayUrl
   $cdp = @(Get-CdpPorts)
   $env:CDP_PORT = if ($cdp.Count) { "$($cdp[0])" } else { '9333' }
-  $env:CDP_PORTS = ((@($cdp) + 9222, 9333, 9223, 9224) | Select-Object -Unique) -join ','
-  $args = @('server.mjs')
+  $env:CDP_PORTS = ((@($cdp) + @(9222, 9333, 9223, 9224)) | Select-Object -Unique) -join ','
+  $argList = @('server.mjs')
   if ($url) {
     $env:CR_RELAY_URL = $url
-    $args += '--relay'
+    $argList += '--relay'
   } else {
-    $args += '--tunnel'
+    $argList += '--tunnel'
   }
-  $script:RelayProc = Start-Process -FilePath 'node' -ArgumentList $args -WorkingDirectory $Root -WindowStyle Hidden -PassThru
+  $script:RelayProc = Start-Process -FilePath 'node' -ArgumentList $argList -WorkingDirectory $Root -WindowStyle Hidden -PassThru
   for ($i = 0; $i -lt 20; $i++) {
     if (Test-PortOpen $Port) {
-      if ($url) { return "已启动中继：$url" }
-      return '已启动（Cloudflare 隧道）'
+      if ($url) { return "OK relay: $url" }
+      return 'OK (cloudflare tunnel)'
     }
     Start-Sleep -Milliseconds 250
   }
-  return '已启动进程，正在等待端口就绪…'
+  return 'Started, waiting for port...'
 }
-function Ensure-Cursor {
+function Ensure-CursorReady {
   $ports = @(Get-CdpPorts)
-  if ($ports.Count) { return "已检测到 Cursor 调试端口：$($ports -join ', ')" }
-  $script = Join-Path $Root 'start-cursor.ps1'
-  if (-not (Test-Path $script)) { throw '找不到 start-cursor.ps1' }
+  if ($ports.Count) { return ("CDP ports: " + ($ports -join ', ')) }
+  $scriptPath = Join-Path $Root 'start-cursor.ps1'
+  if (-not (Test-Path $scriptPath)) { throw 'start-cursor.ps1 not found' }
   $env:CDP_PORT = '9333'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $script
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath
   for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
     $ports = @(Get-CdpPorts)
-    if ($ports.Count) { return 'Cursor 已带调试端口启动' }
+    if ($ports.Count) { return 'Cursor CDP ready' }
   }
-  throw 'Cursor 调试端口仍未就绪'
+  throw 'Cursor CDP not ready'
 }
 function New-PairLink {
   $out = & node (Join-Path $Root 'desktop\pair-link.mjs') 2>&1
@@ -122,7 +123,6 @@ function New-PairLink {
   return $j
 }
 
-# --- UI (Ant ERP tokens) ---
 $form = New-Object Windows.Forms.Form
 $form.Text = 'Cursor Remote Lite'
 $form.Size = New-Object Drawing.Size(580, 720)
@@ -132,9 +132,12 @@ $form.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9)
 
 function New-Label($text, $x, $y, $w, $bold = $false) {
   $l = New-Object Windows.Forms.Label
-  $l.Text = $text; $l.Location = New-Object Drawing.Point($x, $y); $l.Size = New-Object Drawing.Size($w, 22)
+  $l.Text = $text
+  $l.Location = New-Object Drawing.Point($x, $y)
+  $l.Size = New-Object Drawing.Size($w, 22)
   if ($bold) { $l.Font = New-Object Drawing.Font($form.Font, [Drawing.FontStyle]::Bold) }
-  $form.Controls.Add($l); return $l
+  $form.Controls.Add($l)
+  return $l
 }
 function New-Hint($text, $x, $y, $w) {
   $l = New-Label $text $x $y $w
@@ -142,9 +145,11 @@ function New-Hint($text, $x, $y, $w) {
   $l.Height = 36
   return $l
 }
-function New-Btn($text, $x, $y, $primary = $false) {
+function New-Btn($text, $x, $y, $w = 120, $primary = $false) {
   $b = New-Object Windows.Forms.Button
-  $b.Text = $text; $b.Location = New-Object Drawing.Point($x, $y); $b.Size = New-Object Drawing.Size(120, 32)
+  $b.Text = $text
+  $b.Location = New-Object Drawing.Point($x, $y)
+  $b.Size = New-Object Drawing.Size($w, 32)
   $b.FlatStyle = 'Flat'
   if ($primary) {
     $b.BackColor = [Drawing.Color]::FromArgb(0, 122, 255)
@@ -154,33 +159,35 @@ function New-Btn($text, $x, $y, $primary = $false) {
     $b.BackColor = [Drawing.Color]::White
     $b.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(217, 217, 217)
   }
-  $form.Controls.Add($b); return $b
+  $form.Controls.Add($b)
+  return $b
 }
 
 [void](New-Label 'Cursor Remote Lite' 24 16 300 $true)
-[void](New-Hint '电脑端面板 · iPhone 用 Safari 扫码添加到主屏幕（不用装 App）' 24 40 500)
+[void](New-Hint 'Desktop panel - iPhone: Safari scan QR, Add to Home Screen' 24 40 520)
 
-$statusLbl = New-Label '状态：读取中…' 24 80 500
+$statusLbl = New-Label 'Status: ...' 24 80 520
+[void](New-Label 'Public URL (relayUrl)' 24 114 300)
 $urlBox = New-Object Windows.Forms.TextBox
 $urlBox.Location = New-Object Drawing.Point(24, 140)
-$urlBox.Size = New-Object Drawing.Size(400, 32)
+$urlBox.Size = New-Object Drawing.Size(400, 28)
 $urlBox.Text = Get-RelayUrl
 $form.Controls.Add($urlBox)
-[void](New-Label '公网地址 relayUrl' 24 114 300)
-[void](New-Hint 'http:// 也可以；配对会打开中继本身' 24 172 500)
+[void](New-Hint 'http:// is OK - pairing opens the relay itself' 24 172 500)
 
-$btnSave = New-Btn '保存' 436 138
-$btnCursor = New-Btn '检查 Cursor' 24 220
-$btnStop = New-Btn '停止中继' 156 220
-$btnStart = New-Btn '一键启动中继' 288 220 $true
+$btnSave = New-Btn 'Save' 436 138 100
+$btnCursor = New-Btn 'Check Cursor' 24 220 120
+$btnStop = New-Btn 'Stop Relay' 156 220 120
+$btnStart = New-Btn 'Start Relay' 288 220 140 $true
 
+[void](New-Label 'Pair iPhone' 24 270 200 $true)
 $qrBox = New-Object Windows.Forms.PictureBox
 $qrBox.Location = New-Object Drawing.Point(24, 300)
 $qrBox.Size = New-Object Drawing.Size(240, 240)
 $qrBox.BorderStyle = 'FixedSingle'
 $qrBox.SizeMode = 'Zoom'
+$qrBox.BackColor = [Drawing.Color]::White
 $form.Controls.Add($qrBox)
-[void](New-Label '配对 iPhone' 24 270 200 $true)
 
 $linkBox = New-Object Windows.Forms.TextBox
 $linkBox.Location = New-Object Drawing.Point(280, 300)
@@ -190,45 +197,55 @@ $linkBox.ReadOnly = $true
 $linkBox.ScrollBars = 'Vertical'
 $form.Controls.Add($linkBox)
 
-$btnPair = New-Btn '生成配对二维码' 280 440 $true
-$btnCopy = New-Btn '复制链接' 410 440
-$hintPair = New-Hint '扫码 → Safari → 分享 → 添加到主屏幕' 280 480 260
+$btnPair = New-Btn 'Make Pair QR' 280 440 140 $true
+$btnCopy = New-Btn 'Copy Link' 430 440 110
+$hintPair = New-Hint 'Scan -> Safari -> Share -> Add to Home Screen' 280 480 260
 
 $toast = New-Label '' 24 640 520
 $toast.ForeColor = [Drawing.Color]::FromArgb(0, 122, 255)
 
 function Show-Toast($msg, $err = $false) {
   $toast.Text = $msg
-  $toast.ForeColor = if ($err) { [Drawing.Color]::FromArgb(255, 77, 79) } else { [Drawing.Color]::FromArgb(0, 122, 255) }
+  if ($err) {
+    $toast.ForeColor = [Drawing.Color]::FromArgb(255, 77, 79)
+  } else {
+    $toast.ForeColor = [Drawing.Color]::FromArgb(0, 122, 255)
+  }
 }
 function Update-Status {
   $listening = Test-PortOpen $Port
   $alive = $script:RelayProc -and -not $script:RelayProc.HasExited
   $cdp = @(Get-CdpPorts)
-  $cdpText = if ($cdp.Count) { ($cdp | ForEach-Object { ":$_" }) -join ' ' } else { '未检测到' }
-  if ($listening) { $statusLbl.Text = "状态：中继在线 · 端口 $Port · Cursor CDP $cdpText"; $statusLbl.ForeColor = [Drawing.Color]::FromArgb(19, 82, 0) }
-  elseif ($alive) { $statusLbl.Text = "状态：启动中… · Cursor CDP $cdpText"; $statusLbl.ForeColor = [Drawing.Color]::FromArgb(173, 104, 0) }
-  else { $statusLbl.Text = "状态：中继已停止 · Cursor CDP $cdpText"; $statusLbl.ForeColor = [Drawing.Color]::FromArgb(0, 0, 0) }
+  $cdpText = if ($cdp.Count) { ($cdp | ForEach-Object { ":$_" }) -join ' ' } else { 'none' }
+  if ($listening) {
+    $statusLbl.Text = "Status: ONLINE  port $Port  Cursor CDP $cdpText"
+    $statusLbl.ForeColor = [Drawing.Color]::FromArgb(19, 82, 0)
+  } elseif ($alive) {
+    $statusLbl.Text = "Status: starting...  Cursor CDP $cdpText"
+    $statusLbl.ForeColor = [Drawing.Color]::FromArgb(173, 104, 0)
+  } else {
+    $statusLbl.Text = "Status: OFF  Cursor CDP $cdpText"
+    $statusLbl.ForeColor = [Drawing.Color]::Black
+  }
 }
 
 $btnSave.Add_Click({
-  try { Save-RelayUrl $urlBox.Text; Show-Toast '已保存公网地址' } catch { Show-Toast $_.Exception.Message $true }
+  try { Save-RelayUrl $urlBox.Text; Show-Toast 'Saved relayUrl' } catch { Show-Toast $_.Exception.Message $true }
 })
 $btnStart.Add_Click({
   try { Show-Toast (Start-Relay); Update-Status } catch { Show-Toast $_.Exception.Message $true }
 })
 $btnStop.Add_Click({
-  try { Stop-Relay; Show-Toast '已停止中继'; Update-Status } catch { Show-Toast $_.Exception.Message $true }
+  try { Stop-Relay; Show-Toast 'Relay stopped'; Update-Status } catch { Show-Toast $_.Exception.Message $true }
 })
 $btnCursor.Add_Click({
-  try { Show-Toast (Ensure-Cursor); Update-Status } catch { Show-Toast $_.Exception.Message $true }
+  try { Show-Toast (Ensure-CursorReady); Update-Status } catch { Show-Toast $_.Exception.Message $true }
 })
 $btnPair.Add_Click({
   try {
     $j = New-PairLink
     $linkBox.Text = $j.link
-    $hintPair.Text = "$($j.minutes) 分钟内有效，只能用一次"
-    # QR via online chart API (no extra npm); falls back to link-only if offline
+    $hintPair.Text = "$($j.minutes) min, one-time use"
     $enc = [Uri]::EscapeDataString($j.link)
     $tmp = Join-Path $env:TEMP 'cr-pair-qr.png'
     try {
@@ -236,13 +253,17 @@ $btnPair.Add_Click({
       $qrBox.ImageLocation = $tmp
     } catch {
       $qrBox.Image = $null
-      Show-Toast '二维码图下载失败，请用右侧链接' $true
+      Show-Toast 'QR image failed; use link on the right' $true
+      return
     }
-    Show-Toast "配对码已生成（$($j.minutes) 分钟内有效）"
+    Show-Toast "Pair code ready ($($j.minutes) min)"
   } catch { Show-Toast $_.Exception.Message $true }
 })
 $btnCopy.Add_Click({
-  if ($linkBox.Text) { [Windows.Forms.Clipboard]::SetText($linkBox.Text); Show-Toast '已复制配对链接' }
+  if ($linkBox.Text) {
+    [Windows.Forms.Clipboard]::SetText($linkBox.Text)
+    Show-Toast 'Link copied'
+  }
 })
 
 $timer = New-Object Windows.Forms.Timer
@@ -251,10 +272,7 @@ $timer.Add_Tick({ Update-Status })
 $timer.Start()
 Update-Status
 
-$form.Add_FormClosing({
-  # keep relay running when closing panel; only stop if user wants — leave process
-  $timer.Stop()
-})
+$form.Add_FormClosing({ $timer.Stop() })
 
 [Windows.Forms.Application]::EnableVisualStyles()
 [void]$form.ShowDialog()
